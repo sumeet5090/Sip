@@ -14,19 +14,23 @@ function format_inr(float|int $num): string {
 }
 
 // Default values.
-$default_sip            = 1000;
-$default_years          = 10;
-$default_rate           = 12;
-$default_stepup         = 10;
-$default_swp_start      = 10;
-$default_swp_withdrawal = 10000;
-$default_swp_stepup     = 10;
+$default_sip             = 1000;
+$default_years           = 10;
+$default_rate            = 12;
+$default_stepup          = 10;
+$default_swp_start       = 10;
+$default_swp_withdrawal  = 10000;
+$default_swp_stepup      = 10;
+$default_tax             = 12.5;
+$default_inflation       = 6.0;
 
 // Retrieve POST values or use defaults.
 $sip             = isset($_POST['sip']) ? (float)$_POST['sip'] : $default_sip;
 $years           = isset($_POST['years']) ? (int)$_POST['years'] : $default_years;
 $rate            = isset($_POST['rate']) ? (float)$_POST['rate'] : $default_rate;
 $stepup          = isset($_POST['stepup']) ? (float)$_POST['stepup'] : $default_stepup;
+$tax             = isset($_POST['tax']) ? (float)$_POST['tax'] : $default_tax;
+$inflation       = isset($_POST['inflation']) ? (float)$_POST['inflation'] : $default_inflation;
 $swp_start       = isset($_POST['swp_start']) ? (int)$_POST['swp_start'] : $default_swp_start;
 $swp_withdrawal  = isset($_POST['swp_withdrawal']) ? (float)$_POST['swp_withdrawal'] : $default_swp_withdrawal;
 $swp_stepup      = isset($_POST['swp_stepup']) ? (float)$_POST['swp_stepup'] : $default_swp_stepup;
@@ -64,8 +68,16 @@ for ($i = 1; $i <= $years; $i++) {
 $swp_years = max($years, $swp_start + 10 - 1);
 $swp_table = [];
 if ($swp_start >= 1 && $swp_start <= $swp_years && $swp_withdrawal > 0) {
-    // Use SIP total from the year before SWP start if available.
-    $initial_balance = ($swp_start === 1) ? 0.0 : ($swp_start <= $years ? $sip_table[$swp_start - 1]['total'] : 0.0);
+    // Use inflation-adjusted after tax SIP total from the year before SWP start if available.
+    if ($swp_start === 1) {
+        $initial_balance = 0.0;
+    } elseif ($swp_start <= $years) {
+        $sip_total_prev = $sip_table[$swp_start - 1]['total'];
+        $initial_balance = round($sip_total_prev * (1 - $tax / 100) / pow(1 + $inflation / 100, $swp_start - 1));
+    } else {
+        $sip_total_prev = $sip_table[$years]['total'];
+        $initial_balance = round($sip_total_prev * (1 - $tax / 100) / pow(1 + $inflation / 100, $years));
+    }
     $swp_balance = $initial_balance;
     $current_withdrawal = $swp_withdrawal;
     for ($y = $swp_start; $y <= $swp_years; $y++) {
@@ -96,16 +108,24 @@ if ($swp_start >= 1 && $swp_start <= $swp_years && $swp_withdrawal > 0) {
     }
 }
 
-// Combine SIP and SWP results from year 1 to $swp_years, including cumulative SIP invested.
+// Combine SIP and SWP results from year 1 to $swp_years, including cumulative SIP invested and inflation-adjusted after tax SIP total.
 $combined = [];
 for ($y = 1; $y <= $swp_years; $y++) {
+    // For SIP values, use current year if available; otherwise, use final year's data.
+    $sip_invested = ($y <= $years) ? $sip_table[$y]['invested'] : null;
+    $sip_total = ($y <= $years) ? $sip_table[$y]['total'] : $sip_table[$years]['total'];
+    // Calculate inflation-adjusted after tax SIP total.
+    // For years beyond the SIP period, discount the final SIP total.
+    $sip_adjusted_total = round($sip_total * (1 - $tax / 100) / pow(1 + $inflation / 100, $y));
+    
     $combined[$y] = [
         'year'                   => $y,
         'sip_monthly'            => ($y <= $years) ? $sip_table[$y]['monthly_invested'] : null,
-        'sip_invested'           => ($y <= $years) ? $sip_table[$y]['invested'] : null,
+        'sip_invested'           => $sip_invested,
         'cumulative_invested'    => ($y <= $years) ? $cumulative_invested[$y] : $cumulative_invested[$years],
         'sip_interest'           => ($y <= $years) ? $sip_table[$y]['interest'] : null,
-        'sip_total'              => ($y <= $years) ? $sip_table[$y]['total'] : null,
+        'sip_total'              => ($y <= $years) ? $sip_table[$y]['total'] : $sip_table[$years]['total'],
+        'sip_adjusted_total'     => $sip_adjusted_total,
         'swp_begin'              => ($y >= $swp_start && isset($swp_table[$y])) ? $swp_table[$y]['begin'] : null,
         'swp_interest'           => ($y >= $swp_start && isset($swp_table[$y])) ? $swp_table[$y]['interest'] : null,
         'swp_monthly_withdrawal' => ($y >= $swp_start && isset($swp_table[$y])) ? $swp_table[$y]['monthly_withdrawal'] : null,
@@ -124,7 +144,7 @@ if ($action === 'download') {
     $csv->setCsvControl(',', '"', "\\");
     $csv->fputcsv([
         'Year', 'Monthly SIP Investment (₹)', 'SIP Invested (Annual ₹)', 'Cumulative SIP Invested (₹)', 'SIP Interest (₹)', 'SIP Total (₹)',
-        'SWP Begin (₹)', 'SWP Interest (₹)', 'SWP Monthly Withdrawal (₹)', 'SWP Annual Withdrawal (₹)', 'SWP End (₹)'
+        'Inflation Adjusted After Tax SIP Total (₹)', 'SWP Begin (₹)', 'SWP Interest (₹)', 'SWP Monthly Withdrawal (₹)', 'SWP Annual Withdrawal (₹)', 'SWP End (₹)'
     ]);
     for ($y = 1; $y <= $swp_years; $y++) {
         $row = $combined[$y];
@@ -135,6 +155,7 @@ if ($action === 'download') {
             $row['cumulative_invested'] ?? '',
             $row['sip_interest'] ?? '',
             $row['sip_total'] ?? '',
+            $row['sip_adjusted_total'] ?? '',
             $row['swp_begin'] ?? '',
             $row['swp_interest'] ?? '',
             $row['swp_monthly_withdrawal'] ?? '',
@@ -203,6 +224,16 @@ if ($action === 'download') {
               <input type="number" step="0.01" name="stepup" class="form-control" required min="0" value="<?= htmlspecialchars((string)$stepup) ?>">
             </div>
           </div>
+          <div class="row g-3 mt-3">
+            <div class="col-md-3">
+              <label class="form-label">Tax Percentage (%)</label>
+              <input type="number" step="0.01" name="tax" class="form-control" required min="0" value="<?= htmlspecialchars((string)$tax) ?>">
+            </div>
+            <div class="col-md-3">
+              <label class="form-label">Inflation Percentage (%)</label>
+              <input type="number" step="0.01" name="inflation" class="form-control" required min="0" value="<?= htmlspecialchars((string)$inflation) ?>">
+            </div>
+          </div>
         </fieldset>
         <!-- SWP Details -->
         <fieldset class="mb-4">
@@ -244,6 +275,7 @@ if ($action === 'download') {
               <th style="width:10%;">Cumulative SIP Invested</th>
               <th style="width:10%;">SIP Interest</th>
               <th style="width:10%;">SIP Total</th>
+              <th style="width:10%;">Inflation Adjusted After Tax SIP Total</th>
               <th style="width:8%;">SWP Begin</th>
               <th style="width:8%;">SWP Interest</th>
               <th style="width:8%;">SWP Monthly Withdrawal</th>
@@ -260,6 +292,7 @@ if ($action === 'download') {
               <td><?= $row['cumulative_invested'] !== null ? format_inr($row['cumulative_invested']) : '-' ?></td>
               <td><?= $row['sip_interest'] !== null ? format_inr($row['sip_interest']) : '-' ?></td>
               <td><?= $row['sip_total'] !== null ? format_inr($row['sip_total']) : '-' ?></td>
+              <td><?= $row['sip_adjusted_total'] !== null ? format_inr($row['sip_adjusted_total']) : '-' ?></td>
               <td><?= $row['swp_begin'] !== null ? format_inr($row['swp_begin']) : '-' ?></td>
               <td><?= $row['swp_interest'] !== null ? format_inr($row['swp_interest']) : '-' ?></td>
               <td><?= $row['swp_monthly_withdrawal'] !== null ? format_inr($row['swp_monthly_withdrawal']) : '-' ?></td>

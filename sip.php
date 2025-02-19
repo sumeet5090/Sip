@@ -56,9 +56,9 @@ for ($y = 1; $y <= $simulation_years; $y++) {
     
     // Simulate month-by-month for the year.
     for ($m = 1; $m <= 12; $m++) {
-        $contrib = ($y <= $years) ? $monthly_sip : 0;
-        $withdraw = ($y >= $swp_start) ? $monthly_swp : 0;
-        $net_balance = ($net_balance + $contrib - $withdraw) * (1 + $monthly_rate);
+         $contrib = ($y <= $years) ? $monthly_sip : 0;
+         $withdraw = ($y >= $swp_start) ? $monthly_swp : 0;
+         $net_balance = ($net_balance + $contrib - $withdraw) * (1 + $monthly_rate);
     }
     
     $interest_earned = $net_balance - ($year_begin + $annual_contribution - $annual_withdrawal);
@@ -85,11 +85,12 @@ for ($y = 1; $y <= $simulation_years; $y++) {
 if ($action === 'download') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="SIP_SWP_Report.csv"');
-    echo "\xEF\xBB\xBF";
+    echo "\xEF\xBB\xBF"; // BOM for UTF-8 Excel
     $csv = new SplTempFileObject();
     $csv->setCsvControl(',', '"', "\\");
     $csv->fputcsv([
-        'Year', 'Beginning Balance (₹)', 'Monthly SIP Investment (₹)', 'SIP Invested (Annual ₹)', 'Cumulative SIP Invested (₹)', 'Monthly SWP Withdrawal (₹)', 'Annual SWP Withdrawal (₹)', 'Cumulative SWP Withdrawals (₹)', 'Interest Earned (Annual ₹)', 'Combined Total (₹)'
+        'Year', 'Beginning Balance (₹)', 'Monthly SIP Investment (₹)', 'SIP Invested (Annual ₹)', 'Cumulative SIP Invested (₹)',
+        'Monthly SWP Withdrawal (₹)', 'Annual SWP Withdrawal (₹)', 'Cumulative SWP Withdrawals (₹)', 'Interest Earned (Annual ₹)', 'Combined Total (₹)'
     ]);
     for ($y = 1; $y <= $simulation_years; $y++) {
         $row = $combined[$y];

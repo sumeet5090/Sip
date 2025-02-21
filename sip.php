@@ -32,7 +32,7 @@ $swp_stepup      = isset($_POST['swp_stepup']) ? (float)$_POST['swp_stepup'] : $
 $swp_years_input = isset($_POST['swp_years']) ? (int)$_POST['swp_years'] : $default_swp_years;
 $action          = $_POST['action'] ?? '';
 
-// SWP automatically starts the year immediately following the SIP period.
+// SWP automatically starts in the year immediately following the SIP period.
 $swp_start = $years + 1;
 
 $monthly_rate = $rate / 100 / 12;
@@ -46,20 +46,34 @@ $cumulative_withdrawals = 0.0;
 $combined = [];
 
 for ($y = 1; $y <= $simulation_years; $y++) {
+    // Determine monthly SIP (if within SIP period).
     $monthly_sip = ($y <= $years) ? round($sip * pow(1 + $stepup/100, $y - 1), 2) : 0;
     $annual_contribution = $monthly_sip * 12;
     
+    // Determine monthly SWP (if SWP has started).
     $monthly_swp = ($y >= $swp_start) ? round($swp_withdrawal * pow(1 + $swp_stepup/100, $y - $swp_start), 2) : 0;
-    $annual_withdrawal = $monthly_swp * 12;
+    // Instead of precomputing annual SWP, we'll sum actual withdrawals.
+    $actual_year_withdrawn = 0;
     
     $year_begin = $net_balance;
     
+    // Simulate month-by-month for the year.
     for ($m = 1; $m <= 12; $m++) {
          $contrib = ($y <= $years) ? $monthly_sip : 0;
-         $withdraw = ($y >= $swp_start) ? $monthly_swp : 0;
+         // Calculate available funds before withdrawal.
+         $potential_balance = $net_balance + $contrib;
+         if ($y >= $swp_start) {
+             // Cap the withdrawal to available funds.
+             $desired_withdraw = $monthly_swp;
+             $withdraw = ($desired_withdraw > $potential_balance) ? $potential_balance : $desired_withdraw;
+         } else {
+             $withdraw = 0;
+         }
+         $actual_year_withdrawn += $withdraw;
          $net_balance = ($net_balance + $contrib - $withdraw) * (1 + $monthly_rate);
     }
     
+    $annual_withdrawal = $actual_year_withdrawn;
     $interest_earned = $net_balance - ($year_begin + $annual_contribution - $annual_withdrawal);
     $cumulative_invested += $annual_contribution;
     if ($y >= $swp_start) {
@@ -80,14 +94,12 @@ for ($y = 1; $y <= $simulation_years; $y++) {
     ];
 }
 
-// CSV Download using SplTempFileObject.
 if ($action === 'download_csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="SIP_SWP_Report.csv"');
     echo "\xEF\xBB\xBF"; // BOM for UTF-8 Excel
     $csv = new SplTempFileObject();
     $csv->setCsvControl(',', '"', "\\");
-    // Header row remains the same.
     $csv->fputcsv([
         'Year', 'Beginning Balance (₹)', 'Monthly SIP Investment (₹)', 'SIP Invested (Annual ₹)', 'Cumulative SIP Invested (₹)',
         'Monthly SWP Withdrawal (₹)', 'Annual SWP Withdrawal (₹)', 'Cumulative SWP Withdrawals (₹)', 'Interest Earned (Annual ₹)', 'Combined Total (₹)'
@@ -95,7 +107,7 @@ if ($action === 'download_csv') {
     for ($y = 1; $y <= $simulation_years; $y++) {
         $row = $combined[$y];
         $csv->fputcsv([
-            $row['year'],  // Year remains plain.
+            $row['year'],
             format_inr($row['begin_balance']),
             $row['sip_monthly'] !== null ? format_inr($row['sip_monthly']) : '-',
             format_inr($row['annual_contribution']),
@@ -112,6 +124,16 @@ if ($action === 'download_csv') {
         echo $csv->fgets();
     }
     exit;
+}
+
+// Prepare chart data for the line graph.
+$years_data = array();
+$cumulative_data = array();
+$combined_data = array();
+foreach($combined as $row) {
+    $years_data[] = $row['year'];
+    $cumulative_data[] = $row['cumulative_invested'];
+    $combined_data[] = $row['combined_total'];
 }
 ?>
 <!DOCTYPE html>
@@ -134,7 +156,6 @@ if ($action === 'download_csv') {
   }
   </script>
   <link href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.0/dist/cyborg/bootstrap.min.css" rel="stylesheet">
-  <!-- Include Chart.js -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
@@ -169,7 +190,7 @@ if ($action === 'download_csv') {
         </fieldset>
         <fieldset class="mb-4">
           <legend class="mb-3">SWP Details</legend>
-          <!-- SWP starts automatically the year after SIP ends -->
+          <!-- SWP automatically starts in the year after SIP ends -->
           <div class="row g-3">
             <div class="col-md-3">
               <label class="form-label">Monthly SWP Withdrawal (₹)</label>
@@ -247,9 +268,6 @@ if ($action === 'download_csv') {
 <script>
   // Prepare chart data.
   const yearsData = <?= json_encode(array_column($combined, 'year')) ?>;
-  const cumulativeData = <?= json_encode(array_map('format_inr', array_column($combined, 'cumulative_invested'))) ?>;
-  const combinedData = <?= json_encode(array_map('format_inr', array_column($combined, 'combined_total'))) ?>;
-  // However, for Chart.js, we need numeric values.
   const cumulativeNumbers = <?= json_encode(array_column($combined, 'cumulative_invested')) ?>;
   const combinedNumbers = <?= json_encode(array_column($combined, 'combined_total')) ?>;
   

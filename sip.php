@@ -18,33 +18,35 @@ $default_sip             = 1000;
 $default_years           = 10;
 $default_rate            = 12;
 $default_stepup          = 10;
-$default_swp_start       = 10;
 $default_swp_withdrawal  = 10000;
 $default_swp_stepup      = 10;
+$default_swp_years       = 20;  // New: Default number of SWP years after SIP
 
 // Retrieve POST values or use defaults.
 $sip             = isset($_POST['sip']) ? (float)$_POST['sip'] : $default_sip;
 $years           = isset($_POST['years']) ? (int)$_POST['years'] : $default_years;
 $rate            = isset($_POST['rate']) ? (float)$_POST['rate'] : $default_rate;
 $stepup          = isset($_POST['stepup']) ? (float)$_POST['stepup'] : $default_stepup;
-$swp_start       = isset($_POST['swp_start']) ? (int)$_POST['swp_start'] : $default_swp_start;
 $swp_withdrawal  = isset($_POST['swp_withdrawal']) ? (float)$_POST['swp_withdrawal'] : $default_swp_withdrawal;
 $swp_stepup      = isset($_POST['swp_stepup']) ? (float)$_POST['swp_stepup'] : $default_swp_stepup;
+$swp_years_input = isset($_POST['swp_years']) ? (int)$_POST['swp_years'] : $default_swp_years;
 $action          = $_POST['action'] ?? '';
+
+// SWP automatically starts in the year immediately following the SIP period.
+$swp_start = $years + 1;
 
 $monthly_rate = $rate / 100 / 12;
 
-// Define simulation period: extend SWP period to 20 years.
-$simulation_years = max($years, $swp_start + 20 - 1);
+// Define simulation period: SIP years + user-defined SWP years.
+$simulation_years = $years + $swp_years_input;
 
-// Integrated simulation variables.
 $net_balance = 0.0;
 $cumulative_invested = 0.0;
 $cumulative_withdrawals = 0.0;
 $combined = [];
 
 for ($y = 1; $y <= $simulation_years; $y++) {
-    // Determine monthly SIP (if within SIP period).
+    // Determine monthly SIP (only if within SIP period).
     $monthly_sip = ($y <= $years) ? round($sip * pow(1 + $stepup/100, $y - 1), 2) : 0;
     $annual_contribution = $monthly_sip * 12;
     
@@ -82,7 +84,7 @@ for ($y = 1; $y <= $simulation_years; $y++) {
 }
 
 // CSV Download using SplTempFileObject.
-if ($action === 'download') {
+if ($action === 'download_csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="SIP_SWP_Report.csv"');
     echo "\xEF\xBB\xBF"; // BOM for UTF-8 Excel
@@ -139,7 +141,7 @@ if ($action === 'download') {
 <div class="container my-5">
   <header class="mb-4 text-center">
     <h1 class="mb-3">Free SIP & SWP Calculator</h1>
-    <p class="lead">Plan your investments with our integrated tool that factors in both contributions and withdrawals concurrently.</p>
+    <p class="lead">Visualize your investment growth with our integrated tool.</p>
   </header>
   <div class="card mb-4 shadow">
     <div class="card-body">
@@ -167,11 +169,8 @@ if ($action === 'download') {
         </fieldset>
         <fieldset class="mb-4">
           <legend class="mb-3">SWP Details</legend>
+          <!-- SWP starts automatically in the year after SIP ends -->
           <div class="row g-3">
-            <div class="col-md-3">
-              <label class="form-label">SWP Start Year</label>
-              <input type="number" name="swp_start" class="form-control" required min="1" value="<?= htmlspecialchars((string)$swp_start) ?>">
-            </div>
             <div class="col-md-3">
               <label class="form-label">Monthly SWP Withdrawal (₹)</label>
               <input type="number" step="0.01" name="swp_withdrawal" class="form-control" required min="0" value="<?= htmlspecialchars((string)$swp_withdrawal) ?>">
@@ -180,17 +179,22 @@ if ($action === 'download') {
               <label class="form-label">Annual SWP Increase (%)</label>
               <input type="number" step="0.01" name="swp_stepup" class="form-control" required min="0" value="<?= htmlspecialchars((string)$swp_stepup) ?>">
             </div>
+            <div class="col-md-3">
+              <label class="form-label">Number of SWP Years</label>
+              <input type="number" name="swp_years" class="form-control" required min="1" value="<?= htmlspecialchars((string)$swp_years_input) ?>">
+            </div>
           </div>
+          <p class="mt-2 small text-muted">Note: SWP automatically starts in the year immediately following your SIP period.</p>
         </fieldset>
         <div class="mb-3">
           <button type="submit" name="action" value="calculate" class="btn btn-primary me-2">Calculate</button>
-          <button type="submit" name="action" value="download" class="btn btn-secondary me-2">Download CSV Report</button>
+          <button type="submit" name="action" value="download_csv" class="btn btn-secondary me-2">Download CSV Report</button>
           <button type="reset" class="btn btn-outline-danger">Reset</button>
         </div>
       </form>
     </div>
   </div>
-  <?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action !== 'download'): ?>
+  <?php if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action !== 'download_csv'): ?>
   <div class="card shadow">
     <div class="card-body">
       <h2 class="card-title mb-4">Combined SIP & SWP Report</h2>
